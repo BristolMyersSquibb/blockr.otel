@@ -1,5 +1,7 @@
 # blockr.otel
 
+This is a test repo to use OpenTelemetry with blockr apps and analyse results with ... blockr!
+
 ## OTEL setup via otel desktop viewer
 
 1. Setup OTEL in app (.Renviron settings)
@@ -20,13 +22,17 @@ $(go env GOPATH)/bin/otel-desktop-viewer
 
 Viewer live at <http://localhost:8000/traces> (or any other port if this was configured)
 
-1. Start app and play until spans appear
+1. Start app and look for spans appear.
 2. Extract spans with httr2 (the viewer does not provide aggregated results, timelines, ... only span by span detailed view)
 3. Analyse data with blockr workflow.
 4. Look for outstanding spans/discuss.
 
 ## TBD
 
+- Better orchestration (ex: headless startup profiling):
+  - A block that starts up `otel-desktop-viewer` + the app to test via shinytest2 headless driver.
+  - Check and extract spans.
+  - Close connection.
 - Interactive timeline chart.
 - Display more spans (or add filter before timeline block).
 - Make a block recorder, block extractor and block reader.

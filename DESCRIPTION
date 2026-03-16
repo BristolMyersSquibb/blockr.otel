@@ -1,0 +1,28 @@
+Package: blockr.otel
+Title: OpenTelemetry Profiling Tools for Blockr
+Version: 0.1.0
+Authors@R:
+    person("Cynkra", role = c("aut", "cre"), email = "mail@cynkra.com")
+Description: Provides blockr blocks for profiling Shiny applications with
+    OpenTelemetry. Includes an orchestrator block that manages
+    otel-desktop-viewer and shinytest2 app drivers, and integrates with
+    blockr.echarts for interactive timeline visualization.
+License: GPL (>= 3)
+Imports:
+    blockr.core (>= 0.1.1),
+    blockr.echarts,
+    bslib,
+    callr,
+    httr2,
+    processx,
+    promises,
+    shiny,
+    shinytest2,
+    withr
+Suggests:
+    blockr.bi,
+    blockr.extra,
+    devtools
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3

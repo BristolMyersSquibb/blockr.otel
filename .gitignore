@@ -1,3 +1,5 @@
-renv
 .claude
 .Renviron
+.Rproj.user
+*.Rcheck
+*.tar.gz

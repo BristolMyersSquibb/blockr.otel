@@ -9,7 +9,6 @@ new_otel_block(
   browser_port = 8000L,
   http_port = 4318L,
   grpc_port = 4317L,
-  wait_seconds = 10L,
   ...
 )
 }
@@ -21,8 +20,6 @@ new_otel_block(
 \item{http_port}{OTLP HTTP receiver port (default 4318)}
 
 \item{grpc_port}{OTLP gRPC receiver port (default 4317)}
-
-\item{wait_seconds}{Seconds to wait for apps to emit spans (default 10)}
 
 \item{...}{Forwarded to \code{\link[blockr.core:new_data_block]{blockr.core::new_data_block()}}}
 }

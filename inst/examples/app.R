@@ -26,8 +26,7 @@ serve(
         app_paths = "/Users/davidgranjon/david/Cynkra/athlyticz/workshop1",
         browser_port = 8000L,
         http_port = 4318L,
-        grpc_port = 4317L,
-        wait_seconds = 10L
+        grpc_port = 4317L
       ),
 
       # ══ Duration Filter ════════════════════════════════════════════════════════
@@ -93,26 +92,22 @@ serve(
         block_name = "Span Duration Chart"
       ),
 
-      # ══ Timeline (Gantt Chart) ═══════════════════════════════════════════════
-      timeline_filter = new_filter_expr_block("duration_ms >= 50"),
-      timeline_offsets = new_function_block(
-        fn = "function(data) {
-          d <- data[order(data$startTime), ]
-          min_t <- min(d$startTime)
-          d$offset_start <- (d$startTime - min_t) / 1e6
-          d$offset_end <- d$offset_start + d$duration_ms
-          d$span_label <- paste0(d$name, ' (', round(d$duration_ms, 1), 'ms)')
-          d
-        }"
+      # ══ Trace Gantt Timeline ═══════════════════════════════════════════════════
+      gantt_prep = new_mutate_block(
+        exprs = list(
+          offset_start = "(startTime - min(startTime, na.rm = TRUE)) / 1e6",
+          offset_end = "offset_start + duration_ms"
+        )
       ),
       gantt_chart = new_echart_gantt_block(
         start = "offset_start",
         end = "offset_end",
-        name = "span_label",
-        color = "name",
-        title = "Session Timeline",
+        name = "name",
+        span_id = "spanID",
+        parent_span_id = "parentSpanID",
+        title = "Trace Timeline",
         visible = "outputs",
-        block_name = "Span Timeline"
+        block_name = "Trace Timeline"
       )
     ),
     links = list(
@@ -130,10 +125,9 @@ serve(
       new_link("spans_arrange", "top_spans_summary", "data"),
       new_link("top_spans_summary", "top_spans_head", "data"),
       new_link("top_spans_head", "duration_bar_plot", "data"),
-      # ── Timeline (gantt chart) ────────────────────────────────────────────
-      new_link("otel_profiler", "timeline_filter", "data"),
-      new_link("timeline_filter", "timeline_offsets", "data"),
-      new_link("timeline_offsets", "gantt_chart", "data")
+      # ── Trace gantt timeline ───────────────────────────────────────────────
+      new_link("spans_filter", "gantt_prep", "data"),
+      new_link("gantt_prep", "gantt_chart", "data")
     ),
     stacks = list(
       new_stack(
@@ -153,8 +147,8 @@ serve(
         name = "Span Duration Chart"
       ),
       new_stack(
-        blocks = c("timeline_filter", "timeline_offsets", "gantt_chart"),
-        name = "Span Timeline"
+        blocks = c("gantt_prep", "gantt_chart"),
+        name = "Trace Timeline"
       )
     )
   )

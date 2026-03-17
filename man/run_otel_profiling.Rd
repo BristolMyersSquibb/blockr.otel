@@ -8,8 +8,7 @@ run_otel_profiling(
   app_paths,
   browser_port = 8000L,
   http_port = 4318L,
-  grpc_port = 4317L,
-  wait_seconds = 10L
+  grpc_port = 4317L
 )
 }
 \arguments{
@@ -20,8 +19,6 @@ run_otel_profiling(
 \item{http_port}{OTLP HTTP port}
 
 \item{grpc_port}{OTLP gRPC port}
-
-\item{wait_seconds}{Seconds to wait for spans}
 }
 \value{
 A data.frame of spans

@@ -11,7 +11,6 @@
 #' @param browser_port Web UI / JSON-RPC port for otel-desktop-viewer (default 8000)
 #' @param http_port OTLP HTTP receiver port (default 4318)
 #' @param grpc_port OTLP gRPC receiver port (default 4317)
-#' @param wait_seconds Seconds to wait for apps to emit spans (default 10)
 #' @param ... Forwarded to [blockr.core::new_data_block()]
 #'
 #' @return A block object of class `otel_block`.
@@ -21,7 +20,6 @@ new_otel_block <- function(
   browser_port = 8000L,
   http_port = 4318L,
   grpc_port = 4317L,
-  wait_seconds = 10L,
   ...
 ) {
   app_paths_init <- if (length(app_paths) == 0) "" else app_paths
@@ -36,7 +34,6 @@ new_otel_block <- function(
           r_browser_port <- reactiveVal(browser_port)
           r_http_port <- reactiveVal(http_port)
           r_grpc_port <- reactiveVal(grpc_port)
-          r_wait_seconds <- reactiveVal(wait_seconds)
 
           # Dynamic app path management
           r_path_count <- reactiveVal(max(1L, length(app_paths)))
@@ -99,11 +96,6 @@ new_otel_block <- function(
             input$grpc_port,
             r_grpc_port(as.integer(input$grpc_port))
           )
-          observeEvent(
-            input$wait_seconds,
-            r_wait_seconds(as.integer(input$wait_seconds))
-          )
-
           # ── Async profiling task via ExtendedTask + mirai ──────────────
           mirais <- list()
 
@@ -114,8 +106,7 @@ new_otel_block <- function(
                   app_paths = app_paths,
                   browser_port = browser_port,
                   http_port = http_port,
-                  grpc_port = grpc_port,
-                  wait_seconds = wait_seconds
+                  grpc_port = grpc_port
                 )
               },
               ...
@@ -134,7 +125,6 @@ new_otel_block <- function(
               browser_port = r_browser_port(),
               http_port = r_http_port(),
               grpc_port = r_grpc_port(),
-              wait_seconds = r_wait_seconds(),
               .run = run_otel_profiling
             )
           }) |>
@@ -184,8 +174,7 @@ new_otel_block <- function(
               app_paths = r_app_paths,
               browser_port = r_browser_port,
               http_port = r_http_port,
-              grpc_port = r_grpc_port,
-              wait_seconds = r_wait_seconds
+              grpc_port = r_grpc_port
             )
           )
         }
@@ -258,14 +247,6 @@ new_otel_block <- function(
               min = 1024,
               max = 65535,
               width = "100%"
-            ),
-            numericInput(
-              inputId = ns("wait_seconds"),
-              label = "Wait (seconds)",
-              value = wait_seconds,
-              min = 1,
-              max = 300,
-              width = "100%"
             )
           ),
 
@@ -306,7 +287,6 @@ bquote_extended_task <- function(res, msg, status) {
 #' @param browser_port otel-desktop-viewer browser port
 #' @param http_port OTLP HTTP port
 #' @param grpc_port OTLP gRPC port
-#' @param wait_seconds Seconds to wait for spans
 #'
 #' @return A data.frame of spans
 #' @export
@@ -314,8 +294,7 @@ run_otel_profiling <- function(
   app_paths,
   browser_port = 8000L,
   http_port = 4318L,
-  grpc_port = 4317L,
-  wait_seconds = 20L
+  grpc_port = 4317L
 ) {
   if (length(app_paths) == 0) {
     stop("No app paths specified")
@@ -355,7 +334,7 @@ run_otel_profiling <- function(
   )
   on.exit(try(viewer_proc$kill(), silent = TRUE), add = TRUE)
 
-  # Wait for viewer to be ready (poll RPC endpoint)
+  # RPC helper
   rpc <- function(method, params = list()) {
     httr2::request(paste0("http://localhost:", browser_port, "/rpc")) |>
       httr2::req_body_json(list(
@@ -364,15 +343,14 @@ run_otel_profiling <- function(
         params = params,
         id = 1
       )) |>
-      httr2::req_timeout(seconds = 30) |>
+      httr2::req_timeout(seconds = 5) |>
       httr2::req_retry(max_tries = 3, backoff = ~ 2) |>
       httr2::req_perform() |>
       httr2::resp_body_json()
   }
 
-  viewer_ready <- FALSE
+  # Wait for viewer to be ready (retries connection-refused errors)
   for (i in seq_len(10)) {
-    Sys.sleep(1)
     if (!viewer_proc$is_alive()) {
       stop("otel-desktop-viewer died: ", viewer_proc$read_all_error())
     }
@@ -383,13 +361,11 @@ run_otel_profiling <- function(
       },
       error = function(e) FALSE
     )
-    if (ready) {
-      viewer_ready <- TRUE
-      break
-    }
+    if (ready) break
+    Sys.sleep(0.5)
   }
-  if (!viewer_ready) {
-    stop("otel-desktop-viewer did not become ready after 10s")
+  if (!ready) {
+    stop("otel-desktop-viewer did not become ready after 5s")
   }
 
   # Launch apps

@@ -2,7 +2,7 @@
 % Please edit documentation in R/otel-block.R
 \name{run_otel_profiling}
 \alias{run_otel_profiling}
-\title{Run the full OTel profiling pipeline (synchronous, called inside mirai)}
+\title{Run the full OTel profiling pipeline (synchronous)}
 \usage{
 run_otel_profiling(
   app_paths,
@@ -24,5 +24,5 @@ run_otel_profiling(
 A data.frame of spans
 }
 \description{
-Run the full OTel profiling pipeline (synchronous, called inside mirai)
+Kept for backwards compatibility. Runs all phases sequentially.
 }

@@ -5,10 +5,9 @@ library(blockr.echarts)
 library(blockr.otel)
 library(mirai)
 
-# For now, only works in the main process ...
-# I suspect issues happen when shinytest2 is called
-# within mirai...
-daemons(5, sync = TRUE)
+# Async mode: span fetching runs in mirai workers,
+# shinytest2 (chromote) runs in the main process.
+daemons(5)
 ## automatically shutdown daemons when app exits
 shiny::onStop(function() daemons(0))
 
@@ -21,134 +20,128 @@ serve(
       )
     ),
     blocks = list(
-      # ══ Data Source ═══════════════════════════════════════════════════════════
+      # ══ App Drivers ═════════════════════════════════════════════════════════
+      app1 = new_app_driver_block(
+        app_dir = "/Users/davidgranjon/david/Cynkra/athlyticz/workshop1"
+      ),
+      app2 = new_app_driver_block(
+        app_dir = "/Users/davidgranjon/david/Cynkra/SAV-finance/blockr-demo-sav"
+      ),
+
+      # ══ OTel Profiler ═════════════════════════════════════════════════════════
       otel_profiler = new_otel_block(
-        app_paths = "/Users/davidgranjon/david/Cynkra/athlyticz/workshop1",
-        browser_port = 8000L,
-        http_port = 4318L,
-        grpc_port = 4317L
+        browser_port = 8000L
       ),
 
       # ══ Duration Filter ════════════════════════════════════════════════════════
       spans_filter = new_filter_expr_block("duration_ms >= 100"),
-      spans_arrange = new_arrange_block(
-        columns = list(
-          list(column = "duration_ms", direction = "desc")
-        )
-      ),
-
-      # ══ Session Duration Summary ══════════════════════════════════════════════
-      session_duration = new_summarize_expr_block(
-        exprs = list(
-          total_duration_ms = "sum(duration_ms, na.rm = TRUE)",
-          n_spans = "dplyr::n()",
-          min_start = "min(startTime, na.rm = TRUE)",
-          max_end = "max(endTime, na.rm = TRUE)"
-        ),
-        by = "session_id"
-      ),
-      session_kpi = new_kpi_block(
-        measures = c("total_duration_ms", "n_spans"),
-        agg_fun = "sum",
-        suffix = c("ms", ""),
-        digits = "0",
-        titles = c(
-          total_duration_ms = "Total Duration",
-          n_spans = "Total Spans"
-        ),
-        visible = "outputs",
-        block_name = "Session KPIs"
-      ),
-
-      # ══ Spans Sorted by Duration ══════════════════════════════════════════════
-      spans_select = new_select_block(
-        columns = c("name", "duration_ms", "session_id", "depth", "statusCode")
-      ),
-      spans_head = new_head_block(n = 5),
-      spans_table = new_summarize_expr_block(
-        exprs = list(
-          total_duration_ms = "round(sum(duration_ms, na.rm = TRUE), 2)",
-          count = "dplyr::n()",
-          avg_duration_ms = "round(mean(duration_ms, na.rm = TRUE), 2)"
-        ),
-        by = "name",
-        visible = "outputs",
-        block_name = "Spans by Duration"
-      ),
-
-      # ══ Duration Bar Chart ════════════════════════════════════════════════════
-      top_spans_summary = new_summarize_expr_block(
+      # ══ App 1 branch ═══════════════════════════════════════════════════════
+      filter_app1 = new_filter_expr_block("service_name == 'workshop1'"),
+      app1_summary = new_summarize_expr_block(
         exprs = list(
           total_duration_ms = "round(sum(duration_ms, na.rm = TRUE), 2)"
         ),
         by = "name"
       ),
-      top_spans_head = new_head_block(n = 5),
-      duration_bar_plot = new_ggplot_block(
+      app1_head = new_head_block(n = 5),
+      app1_bar_plot = new_ggplot_block(
         type = "bar",
         x = "total_duration_ms",
         y = "name",
         visible = "outputs",
-        block_name = "Span Duration Chart"
+        block_name = "App 1 Span Duration"
       ),
 
-      # ══ Trace Gantt Timeline ═══════════════════════════════════════════════════
-      gantt_prep = new_mutate_block(
+      # ══ App 2 branch ═══════════════════════════════════════════════════════
+      filter_app2 = new_filter_expr_block("service_name == 'blockr-demo-sav'"),
+      app2_summary = new_summarize_expr_block(
+        exprs = list(
+          total_duration_ms = "round(sum(duration_ms, na.rm = TRUE), 2)"
+        ),
+        by = "name"
+      ),
+      app2_head = new_head_block(n = 5),
+      app2_bar_plot = new_ggplot_block(
+        type = "bar",
+        x = "total_duration_ms",
+        y = "name",
+        visible = "outputs",
+        block_name = "App 2 Span Duration"
+      ),
+
+      # ══ App 1 Trace Gantt Timeline ════════════════════════════════════════════
+      app1_gantt_prep = new_mutate_block(
         exprs = list(
           offset_start = "(startTime - min(startTime, na.rm = TRUE)) / 1e6",
           offset_end = "offset_start + duration_ms"
         )
       ),
-      gantt_chart = new_echart_gantt_block(
+      app1_gantt_chart = new_echart_gantt_block(
         start = "offset_start",
         end = "offset_end",
         name = "name",
         span_id = "spanID",
         parent_span_id = "parentSpanID",
-        title = "Trace Timeline",
+        title = "App 1 Trace Timeline",
         visible = "outputs",
-        block_name = "Trace Timeline"
+        block_name = "App 1 Trace Timeline"
+      ),
+
+      # ══ App 2 Trace Gantt Timeline ════════════════════════════════════════════
+      app2_gantt_prep = new_mutate_block(
+        exprs = list(
+          offset_start = "(startTime - min(startTime, na.rm = TRUE)) / 1e6",
+          offset_end = "offset_start + duration_ms"
+        )
+      ),
+      app2_gantt_chart = new_echart_gantt_block(
+        start = "offset_start",
+        end = "offset_end",
+        name = "name",
+        span_id = "spanID",
+        parent_span_id = "parentSpanID",
+        title = "App 2 Trace Timeline",
+        visible = "outputs",
+        block_name = "App 2 Trace Timeline"
       )
     ),
     links = list(
-      # ── Duration filter + arrange ─────────────────────────────────────────
+      # ── App drivers → OTel profiler (variadic) ────────────────────────────
+      new_link("app1", "otel_profiler", ""),
+      new_link("app2", "otel_profiler", ""),
+      # ── OTel profiler → downstream ────────────────────────────────────────
       new_link("otel_profiler", "spans_filter", "data"),
-      new_link("spans_filter", "spans_arrange", "data"),
-      # ── Session Summary chain ─────────────────────────────────────────────
-      new_link("spans_arrange", "session_duration", "data"),
-      new_link("session_duration", "session_kpi", "data"),
-      # ── Spans sorted by duration ──────────────────────────────────────────
-      new_link("spans_arrange", "spans_select", "data"),
-      new_link("spans_select", "spans_head", "data"),
-      new_link("spans_head", "spans_table", "data"),
-      # ── Duration bar chart ────────────────────────────────────────────────
-      new_link("spans_arrange", "top_spans_summary", "data"),
-      new_link("top_spans_summary", "top_spans_head", "data"),
-      new_link("top_spans_head", "duration_bar_plot", "data"),
-      # ── Trace gantt timeline ───────────────────────────────────────────────
-      new_link("spans_filter", "gantt_prep", "data"),
-      new_link("gantt_prep", "gantt_chart", "data")
+      # ── App 1 branch ──────────────────────────────────────────────────────
+      new_link("spans_filter", "filter_app1", "data"),
+      new_link("filter_app1", "app1_summary", "data"),
+      new_link("app1_summary", "app1_head", "data"),
+      new_link("app1_head", "app1_bar_plot", "data"),
+      # ── App 2 branch ──────────────────────────────────────────────────────
+      new_link("spans_filter", "filter_app2", "data"),
+      new_link("filter_app2", "app2_summary", "data"),
+      new_link("app2_summary", "app2_head", "data"),
+      new_link("app2_head", "app2_bar_plot", "data"),
+      # ── App 1 trace gantt timeline ─────────────────────────────────────────
+      new_link("filter_app1", "app1_gantt_prep", "data"),
+      new_link("app1_gantt_prep", "app1_gantt_chart", "data"),
+      # ── App 2 trace gantt timeline ─────────────────────────────────────────
+      new_link("filter_app2", "app2_gantt_prep", "data"),
+      new_link("app2_gantt_prep", "app2_gantt_chart", "data")
     ),
     stacks = list(
       new_stack(
-        blocks = c("session_duration", "session_kpi"),
-        name = "Session Summary"
-      ),
-      new_stack(
-        blocks = c("spans_select", "spans_head", "spans_table"),
-        name = "Spans by Duration"
+        blocks = c(
+          "filter_app1", "app1_summary", "app1_head", "app1_bar_plot",
+          "app1_gantt_prep", "app1_gantt_chart"
+        ),
+        name = "App 1 Spans"
       ),
       new_stack(
         blocks = c(
-          "top_spans_summary",
-          "top_spans_head",
-          "duration_bar_plot"
+          "filter_app2", "app2_summary", "app2_head", "app2_bar_plot",
+          "app2_gantt_prep", "app2_gantt_chart"
         ),
-        name = "Span Duration Chart"
-      ),
-      new_stack(
-        blocks = c("gantt_prep", "gantt_chart"),
-        name = "Trace Timeline"
+        name = "App 2 Spans"
       )
     )
   )

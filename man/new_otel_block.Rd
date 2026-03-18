@@ -2,36 +2,26 @@
 % Please edit documentation in R/otel-block.R
 \name{new_otel_block}
 \alias{new_otel_block}
-\title{OTel Orchestrator Block}
+\title{OTel Profiler Block}
 \usage{
-new_otel_block(
-  app_paths = character(),
-  browser_port = 8000L,
-  http_port = 4318L,
-  grpc_port = 4317L,
-  ...
-)
+new_otel_block(browser_port = 8000L, ...)
 }
 \arguments{
-\item{app_paths}{Character vector of paths to Shiny app directories}
+\item{browser_port}{Web UI / JSON-RPC port for otel-desktop-viewer
+(default 8000)}
 
-\item{browser_port}{Web UI / JSON-RPC port for otel-desktop-viewer (default 8000)}
-
-\item{http_port}{OTLP HTTP receiver port (default 4318)}
-
-\item{grpc_port}{OTLP gRPC receiver port (default 4317)}
-
-\item{...}{Forwarded to \code{\link[blockr.core:new_data_block]{blockr.core::new_data_block()}}}
+\item{...}{Forwarded to \code{\link[blockr.core:new_transform_block]{blockr.core::new_transform_block()}}}
 }
 \value{
 A block object of class \code{otel_block}.
 }
 \description{
-A data block that manages the full OpenTelemetry profiling lifecycle:
-starts otel-desktop-viewer, launches Shiny apps via shinytest2, waits
-for spans, fetches them via RPC, and cleans up all processes.
+A variadic transform block that starts otel-desktop-viewer, collects
+spans from upstream \link{new_app_driver_block} apps, and returns a
+consolidated spans data.frame.
 }
 \details{
-Runs asynchronously using \link[shiny:ExtendedTask]{shiny::ExtendedTask} and \code{\link[mirai:mirai]{mirai::mirai()}} so the
-Shiny session remains responsive during profiling.
+Connects to one or more \code{app_driver_block}s via the \code{...args} variadic
+input. Port configuration is resolved from environment variables
+(see \code{\link[=otel_http_port]{otel_http_port()}}, \code{\link[=otel_grpc_port]{otel_grpc_port()}}).
 }

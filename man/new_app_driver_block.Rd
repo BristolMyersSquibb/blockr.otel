@@ -23,3 +23,9 @@ background Rscript process. The AppDriver handles both launching the app
 and connecting a headless Chrome session, triggering Shiny session
 creation and OTEL span generation.
 }
+\details{
+Uses \link[shiny:ExtendedTask]{shiny::ExtendedTask} + \code{\link[mirai:mirai]{mirai::mirai()}} so the start button shows a
+loading indicator while the AppDriver boots up. The mirai worker
+launches the Rscript, polls its stdout for the app URL, and returns
+the URL + PID. The main process stores the PID for stop/cleanup.
+}

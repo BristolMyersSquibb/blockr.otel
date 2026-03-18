@@ -4,32 +4,13 @@
 \alias{new_app_driver_block}
 \title{App Driver Block}
 \usage{
-new_app_driver_block(
-  app_dir = "",
-  name = NULL,
-  load_timeout = 15000L,
-  timeout = 4000L,
-  height = 400L,
-  width = 800L,
-  shiny_args = list(),
-  ...
-)
+new_app_driver_block(app_dir = "", name = NULL, ...)
 }
 \arguments{
-\item{app_dir}{Path to a Shiny app directory, file, URL, or app object.
-See \link[shinytest2:AppDriver]{shinytest2::AppDriver} for details.}
+\item{app_dir}{Path to a Shiny app directory or single-file app.}
 
-\item{name}{Optional name for the AppDriver instance}
-
-\item{load_timeout}{Maximum time to wait for the app to load (ms)}
-
-\item{timeout}{Default timeout for AppDriver operations (ms)}
-
-\item{height}{Browser window height in pixels}
-
-\item{width}{Browser window width in pixels}
-
-\item{shiny_args}{List of arguments passed to \code{\link[shiny:runApp]{shiny::runApp()}}}
+\item{name}{Optional service name for OTEL. Defaults to the app
+directory basename.}
 
 \item{...}{Forwarded to \code{\link[blockr.core:new_data_block]{blockr.core::new_data_block()}}}
 }
@@ -37,7 +18,8 @@ See \link[shinytest2:AppDriver]{shinytest2::AppDriver} for details.}
 A block object of class \code{app_driver_block}.
 }
 \description{
-A data block that starts a Shiny app via \link[shinytest2:AppDriver]{shinytest2::AppDriver} with
-OpenTelemetry instrumentation. The app runs in the main R process
-(chromote requirement) and emits OTLP traces to the configured endpoint.
+A data block that starts a Shiny app via \link[shinytest2:AppDriver]{shinytest2::AppDriver} in a
+background Rscript process. The AppDriver handles both launching the app
+and connecting a headless Chrome session, triggering Shiny session
+creation and OTEL span generation.
 }

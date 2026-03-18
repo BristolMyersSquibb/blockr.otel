@@ -1,17 +1,13 @@
 #' App Driver Block
 #'
-#' A data block that starts a Shiny app via [shinytest2::AppDriver] with
-#' OpenTelemetry instrumentation. The app runs in the main R process
-#' (chromote requirement) and emits OTLP traces to the configured endpoint.
+#' A data block that starts a Shiny app via [shinytest2::AppDriver] in a
+#' background Rscript process. The AppDriver handles both launching the app
+#' and connecting a headless Chrome session, triggering Shiny session
+#' creation and OTEL span generation.
 #'
-#' @param app_dir Path to a Shiny app directory, file, URL, or app object.
-#'   See [shinytest2::AppDriver] for details.
-#' @param name Optional name for the AppDriver instance
-#' @param load_timeout Maximum time to wait for the app to load (ms)
-#' @param timeout Default timeout for AppDriver operations (ms)
-#' @param height Browser window height in pixels
-#' @param width Browser window width in pixels
-#' @param shiny_args List of arguments passed to [shiny::runApp()]
+#' @param app_dir Path to a Shiny app directory or single-file app.
+#' @param name Optional service name for OTEL. Defaults to the app
+#'   directory basename.
 #' @param ... Forwarded to [blockr.core::new_data_block()]
 #'
 #' @return A block object of class `app_driver_block`.
@@ -19,11 +15,6 @@
 new_app_driver_block <- function(
   app_dir = "",
   name = NULL,
-  load_timeout = 15000L,
-  timeout = 4000L,
-  height = 400L,
-  width = 800L,
-  shiny_args = list(),
   ...
 ) {
   blockr.core::new_data_block(
@@ -34,7 +25,9 @@ new_app_driver_block <- function(
           ns <- session$ns
 
           r_app_dir <- reactiveVal(app_dir)
-          r_driver <- reactiveVal(NULL)
+          r_process <- reactiveVal(NULL)
+          r_app_url <- reactiveVal(NULL)
+          r_svc_name <- reactiveVal(name %||% "")
           r_result <- reactiveVal(
             data.frame(
               app_url = NA_character_,
@@ -47,12 +40,8 @@ new_app_driver_block <- function(
 
           # ── Start app ──────────────────────────────────────────────
           observeEvent(input$start, {
-            # Stop existing driver if any
-            drv <- r_driver()
-            if (!is.null(drv)) {
-              try(drv$stop(), silent = TRUE)
-              r_driver(NULL)
-            }
+            stop_app_driver(r_process)
+            r_process(NULL)
 
             app_dir_val <- r_app_dir()
             if (nchar(app_dir_val) == 0) return()
@@ -77,40 +66,136 @@ new_app_driver_block <- function(
 
             http_port <- otel_http_port()
 
-            drv <- withr::with_envvar(
-              c(
-                OTEL_SERVICE_NAME = svc_name,
-                OTEL_EXPORTER_OTLP_ENDPOINT = paste0(
-                  "http://localhost:", http_port
-                ),
-                OTEL_TRACES_EXPORTER = "otlp",
-                OTEL_EXPORTER_OTLP_PROTOCOL = "http/protobuf"
+            otel_vars <- c(
+              OTEL_SERVICE_NAME = svc_name,
+              OTEL_EXPORTER_OTLP_ENDPOINT = paste0(
+                "http://localhost:", http_port
               ),
-              shinytest2::AppDriver$new(
-                app_dir = resolved_dir,
-                name = svc_name,
-                load_timeout = load_timeout,
-                timeout = timeout,
-                height = height,
-                width = width,
-                shiny_args = shiny_args
-              )
+              OTEL_TRACES_EXPORTER = "otlp",
+              OTEL_EXPORTER_OTLP_PROTOCOL = "http/protobuf"
             )
 
-            r_driver(drv)
-            r_result(data.frame(
-              app_url = drv$get_url(),
-              name = svc_name,
-              stringsAsFactors = FALSE
-            ))
+            # Launch shinytest2::AppDriver in a background Rscript.
+            # The Rscript gets its own event loop so chromote works.
+            # It prints the app URL to stdout for the main process.
+            driver_proc <- tryCatch(
+              launch_app_driver_bg(resolved_dir, svc_name, otel_vars),
+              error = function(e) {
+                showNotification(
+                  paste("Launch error:", e$message),
+                  type = "error",
+                  duration = 10
+                )
+                NULL
+              }
+            )
+
+            if (is.null(driver_proc)) return()
+
+            r_process(driver_proc)
+            r_svc_name(svc_name)
+
+            showNotification(
+              sprintf("Starting %s...", svc_name),
+              type = "message",
+              duration = 3
+            )
           })
 
-          # ── Stop app ───────────────────────────────────────────────
-          observeEvent(input$stop, {
-            drv <- r_driver()
-            if (!is.null(drv)) {
-              try(drv$stop(), silent = TRUE)
-              r_driver(NULL)
+          # ── Non-blocking poll for app URL from AppDriver stdout ──
+          observe({
+            proc <- r_process()
+            if (is.null(proc)) return()
+            # Already got the URL
+            if (!is.null(r_app_url())) return()
+
+            out <- tryCatch(
+              proc$read_output_lines(),
+              error = function(e) character(0)
+            )
+            url_line <- grep("^APP_URL:", out, value = TRUE)
+
+            if (length(url_line) > 0) {
+              app_url <- sub("^APP_URL:", "", url_line[1])
+              r_app_url(app_url)
+              r_result(data.frame(
+                app_url = app_url,
+                name = r_svc_name(),
+                stringsAsFactors = FALSE
+              ))
+              showNotification(
+                sprintf("Started %s at %s", r_svc_name(), app_url),
+                type = "message",
+                duration = 3
+              )
+              return()
+            }
+
+            if (!proc$is_alive()) {
+              err <- tryCatch(
+                proc$read_all_error(),
+                error = function(e) ""
+              )
+              showNotification(
+                paste0("AppDriver died: ", substr(err, 1, 500)),
+                type = "error",
+                duration = 15
+              )
+              r_process(NULL)
+              return()
+            }
+
+            # Not ready yet — check again in 500ms
+            invalidateLater(500)
+          })
+
+          # ── Show process log on demand ─────────────────────────
+          observeEvent(input$log, {
+            proc <- r_process()
+            if (is.null(proc)) {
+              showNotification("No process running.", type = "warning")
+              return()
+            }
+            err <- tryCatch(proc$read_error(), error = function(e) "")
+            out <- tryCatch(proc$read_output(), error = function(e) "")
+            alive <- tryCatch(proc$is_alive(), error = function(e) FALSE)
+            parts <- sprintf("=== AppDriver (alive: %s) ===", alive)
+            if (nchar(err) > 0) parts <- c(parts, paste0("STDERR:\n", err))
+            if (nchar(out) > 0) parts <- c(parts, paste0("STDOUT:\n", out))
+            msg <- paste(parts, collapse = "\n")
+            showNotification(
+              tags$pre(
+                style = "white-space: pre-wrap; max-height: 400px; overflow: auto;",
+                msg
+              ),
+              type = "message",
+              duration = 30
+            )
+          })
+
+          # ── Monitor process health ───────────────────────────────
+          observe({
+            proc <- r_process()
+            if (is.null(proc)) return()
+            invalidateLater(2000)
+            if (!proc$is_alive()) {
+              stderr_out <- tryCatch(
+                proc$read_all_error(),
+                error = function(e) ""
+              )
+              showNotification(
+                paste0(
+                  "AppDriver exited. ",
+                  if (nchar(stderr_out) > 0)
+                    paste0("stderr:\n", substr(stderr_out, 1, 500))
+                  else
+                    "No stderr output."
+                ),
+                type = "error",
+                duration = 15
+              )
+              r_process(NULL)
+              r_app_url(NULL)
               r_result(data.frame(
                 app_url = NA_character_,
                 name = name %||% "",
@@ -119,12 +204,21 @@ new_app_driver_block <- function(
             }
           })
 
+          # ── Stop app ───────────────────────────────────────────────
+          observeEvent(input$stop, {
+            stop_app_driver(r_process)
+            r_process(NULL)
+            r_app_url(NULL)
+            r_result(data.frame(
+              app_url = NA_character_,
+              name = name %||% "",
+              stringsAsFactors = FALSE
+            ))
+          })
+
           # ── Cleanup on session end ─────────────────────────────────
           session$onSessionEnded(function() {
-            drv <- isolate(r_driver())
-            if (!is.null(drv)) {
-              try(drv$stop(), silent = TRUE)
-            }
+            stop_app_driver(r_process)
           })
 
           list(
@@ -133,12 +227,7 @@ new_app_driver_block <- function(
             ),
             state = list(
               app_dir = r_app_dir,
-              name = name,
-              load_timeout = load_timeout,
-              timeout = timeout,
-              height = height,
-              width = width,
-              shiny_args = shiny_args
+              name = name
             )
           )
         }
@@ -171,6 +260,12 @@ new_app_driver_block <- function(
               "Stop App",
               icon = icon("stop"),
               class = "btn-danger btn-sm"
+            ),
+            actionButton(
+              ns("log"),
+              "Log",
+              icon = icon("terminal"),
+              class = "btn-secondary btn-sm"
             )
           )
         )
@@ -180,4 +275,68 @@ new_app_driver_block <- function(
     class = "app_driver_block",
     ...
   )
+}
+
+#' Launch shinytest2::AppDriver in a background Rscript
+#'
+#' Writes a temp R script that creates an AppDriver with OTEL env vars,
+#' prints the app URL to stdout, then keeps the process alive.
+#' Runs in its own Rscript process so chromote has its own event loop.
+#'
+#' @param app_dir Resolved app directory path
+#' @param name Service name for the AppDriver
+#' @param otel_vars Named character vector of OTEL env vars
+#' @return A processx::process object
+#' @noRd
+launch_app_driver_bg <- function(app_dir, name, otel_vars) {
+  lib_paths <- paste(deparse(.libPaths()), collapse = "")
+  chrome_bin <- chromote::find_chrome()
+
+  # Serialize OTEL env vars as R code
+  otel_code <- paste0(
+    "Sys.setenv(",
+    paste(
+      sprintf('"%s" = "%s"', names(otel_vars), unname(otel_vars)),
+      collapse = ", "
+    ),
+    ")"
+  )
+
+  script <- tempfile(pattern = "appdriver_", fileext = ".R")
+  writeLines(c(
+    sprintf(".libPaths(%s)", lib_paths),
+    sprintf("Sys.setenv(CHROMOTE_CHROME = '%s')", chrome_bin),
+    "Sys.setenv(NOT_CRAN = 'true')",
+    otel_code,
+    "",
+    "message('[appdriver] Creating AppDriver...')",
+    sprintf(
+      "app <- shinytest2::AppDriver$new(app_dir = '%s', name = '%s')",
+      app_dir, name
+    ),
+    "message('[appdriver] AppDriver ready')",
+    "",
+    "# Print app URL to stdout so the main process can read it",
+    "cat(paste0('APP_URL:', app$get_url()), '\\n')",
+    "",
+    "# Keep alive — AppDriver manages both app + Chrome",
+    "while (TRUE) Sys.sleep(1)"
+  ), script)
+
+  processx::process$new(
+    command = file.path(R.home("bin"), "Rscript"),
+    args = script,
+    stdout = "|",
+    stderr = "|",
+    cleanup = FALSE
+  )
+}
+
+#' Stop the AppDriver background process
+#' @noRd
+stop_app_driver <- function(r_process) {
+  proc <- isolate(r_process())
+  if (!is.null(proc) && proc$is_alive()) {
+    proc$kill()
+  }
 }

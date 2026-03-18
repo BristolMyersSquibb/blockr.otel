@@ -85,10 +85,12 @@ new_otel_block <- function(
             # in the worker process (devtools::load_all doesn't serialize).
             m <- mirai::mirai(
               {
+                base_url <- paste0(
+                  "http://localhost:", browser_port, "/rpc"
+                )
+
                 rpc <- function(method, params = list()) {
-                  httr2::request(
-                    paste0("http://localhost:", browser_port, "/rpc")
-                  ) |>
+                  httr2::request(base_url) |>
                     httr2::req_body_json(list(
                       jsonrpc = "2.0",
                       method = method,
@@ -100,40 +102,108 @@ new_otel_block <- function(
                     httr2::resp_body_json()
                 }
 
-                summaries <- rpc("getTraceSummaries")$result
-                spans_list <- unlist(
-                  lapply(summaries, function(s) {
-                    trace <- rpc("getTraceByID", list(s$traceID))$result
-                    svc <- s$rootServiceName
-                    lapply(trace$spans, function(sp) {
-                      d <- sp$spanData
-                      data.frame(
-                        traceID = d$traceID,
-                        spanID = d$spanID,
-                        parentSpanID = d$parentSpanID,
-                        name = d$name,
-                        kind = d$kind,
-                        statusCode = d$statusCode,
-                        startTime = as.numeric(d$startTime),
-                        endTime = as.numeric(d$endTime),
-                        duration_ms = (as.numeric(d$endTime) -
-                          as.numeric(d$startTime)) /
-                          1e6,
-                        depth = sp$depth,
-                        service_name = if (!is.null(svc)) svc else NA_character_,
-                        session_id = if (!is.null(d$attributes$session.id)) {
-                          d$attributes$session.id
-                        } else {
-                          NA_character_
-                        },
-                        stringsAsFactors = FALSE
-                      )
-                    })
-                  }),
-                  recursive = FALSE
+                empty_df <- data.frame(
+                  traceID = character(),
+                  spanID = character(),
+                  parentSpanID = character(),
+                  name = character(),
+                  kind = character(),
+                  statusCode = character(),
+                  startTime = numeric(),
+                  endTime = numeric(),
+                  duration_ms = numeric(),
+                  depth = integer(),
+                  service_name = character(),
+                  session_id = character(),
+                  stringsAsFactors = FALSE
                 )
 
-                do.call(rbind, spans_list)
+                summaries <- rpc("getTraceSummaries")$result
+                if (length(summaries) == 0) return(empty_df)
+
+                # Fetch all traces in parallel
+                reqs <- lapply(summaries, function(s) {
+                  httr2::request(base_url) |>
+                    httr2::req_body_json(list(
+                      jsonrpc = "2.0",
+                      method = "getTraceByID",
+                      params = list(s$traceID),
+                      id = 1
+                    )) |>
+                    httr2::req_timeout(seconds = 5)
+                })
+                resps <- httr2::req_perform_parallel(
+                  reqs,
+                  on_error = "continue"
+                )
+
+                # Count total spans for pre-allocation
+                traces <- lapply(resps, function(r) {
+                  tryCatch(
+                    httr2::resp_body_json(r)$result,
+                    error = function(e) NULL
+                  )
+                })
+                n_total <- sum(vapply(
+                  traces,
+                  function(t) if (is.null(t)) 0L else length(t$spans),
+                  integer(1)
+                ))
+                if (n_total == 0) return(empty_df)
+
+                # Pre-allocate vectors
+                v_traceID <- character(n_total)
+                v_spanID <- character(n_total)
+                v_parentSpanID <- character(n_total)
+                v_name <- character(n_total)
+                v_kind <- character(n_total)
+                v_statusCode <- character(n_total)
+                v_startTime <- numeric(n_total)
+                v_endTime <- numeric(n_total)
+                v_depth <- integer(n_total)
+                v_service_name <- character(n_total)
+                v_session_id <- character(n_total)
+
+                idx <- 0L
+                for (trace in traces) {
+                  if (is.null(trace)) next
+                  for (sp in trace$spans) {
+                    idx <- idx + 1L
+                    d <- sp$spanData
+                    v_traceID[idx] <- d$traceID %||% NA_character_
+                    v_spanID[idx] <- d$spanID %||% NA_character_
+                    v_parentSpanID[idx] <- d$parentSpanID %||%
+                      NA_character_
+                    v_name[idx] <- d$name %||% NA_character_
+                    v_kind[idx] <- d$kind %||% NA_character_
+                    v_statusCode[idx] <- d$statusCode %||% NA_character_
+                    v_startTime[idx] <- as.numeric(d$startTime)
+                    v_endTime[idx] <- as.numeric(d$endTime)
+                    v_depth[idx] <- sp$depth %||% 0L
+                    svc <- d$resource$attributes$service.name
+                    v_service_name[idx] <- if (
+                      is.null(svc) || !nzchar(svc)
+                    ) NA_character_ else svc
+                    sid <- d$attributes$session.id
+                    v_session_id[idx] <- sid %||% NA_character_
+                  }
+                }
+
+                data.frame(
+                  traceID = v_traceID,
+                  spanID = v_spanID,
+                  parentSpanID = v_parentSpanID,
+                  name = v_name,
+                  kind = v_kind,
+                  statusCode = v_statusCode,
+                  startTime = v_startTime,
+                  endTime = v_endTime,
+                  duration_ms = (v_endTime - v_startTime) / 1e6,
+                  depth = v_depth,
+                  service_name = v_service_name,
+                  session_id = v_session_id,
+                  stringsAsFactors = FALSE
+                )
               },
               browser_port = browser_port
             )
@@ -151,14 +221,23 @@ new_otel_block <- function(
               )
               return()
             }
+            r_cleared(FALSE)
             run_task$invoke(
               browser_port = r_browser_port()
             )
           }) |>
             bindEvent(input$run)
 
+          # Overridden by clear button
+          r_cleared <- reactiveVal(FALSE)
+
           # Result reactive with status handling
           task_result <- reactive({
+            if (r_cleared()) {
+              return(bquote_extended_task(
+                data.frame(), "Traces cleared.", "initial"
+              ))
+            }
             tryCatch(
               bquote_extended_task(
                 run_task$result(),
@@ -214,6 +293,28 @@ new_otel_block <- function(
             }
           })
 
+          # ── Clear spans ─────────────────────────────────────────
+          observeEvent(input$clear, {
+            tryCatch(
+              {
+                rpc_call("clearTraces", port = r_browser_port())
+                r_cleared(TRUE)
+                showNotification(
+                  "Traces cleared.",
+                  type = "message",
+                  duration = 3
+                )
+              },
+              error = function(e) {
+                showNotification(
+                  paste("Clear failed:", e$message),
+                  type = "error",
+                  duration = 5
+                )
+              }
+            )
+          })
+
           list(
             expr = task_result,
             state = list(
@@ -240,11 +341,18 @@ new_otel_block <- function(
           ),
           uiOutput(ns("app_status")),
           div(
+            class = "d-flex gap-2",
             style = "margin-top: 10px;",
             bslib::input_task_button(
               ns("run"),
               "Fetch Spans",
-              class = "btn-primary"
+              class = "btn-primary btn-sm"
+            ),
+            actionButton(
+              ns("clear"),
+              "Clear Spans",
+              icon = icon("trash"),
+              class = "btn-danger btn-sm"
             )
           )
         )

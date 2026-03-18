@@ -3,7 +3,7 @@
   blockr.core::register_blocks(
     "new_app_driver_block",
     name = "App Driver",
-    description = "Start a Shiny app via shinytest2 with OTEL instrumentation",
+    description = "Start a Shiny app via shinytest2 AppDriver with OTEL instrumentation",
     category = "input",
     icon = "play-circle",
     package = utils::packageName(),

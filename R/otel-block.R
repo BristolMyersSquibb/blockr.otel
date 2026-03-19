@@ -86,7 +86,9 @@ new_otel_block <- function(
             m <- mirai::mirai(
               {
                 base_url <- paste0(
-                  "http://localhost:", browser_port, "/rpc"
+                  "http://localhost:",
+                  browser_port,
+                  "/rpc"
                 )
 
                 rpc <- function(method, params = list()) {
@@ -119,7 +121,9 @@ new_otel_block <- function(
                 )
 
                 summaries <- rpc("getTraceSummaries")$result
-                if (length(summaries) == 0) return(empty_df)
+                if (length(summaries) == 0) {
+                  return(empty_df)
+                }
 
                 # Fetch all traces in parallel
                 reqs <- lapply(summaries, function(s) {
@@ -149,7 +153,9 @@ new_otel_block <- function(
                   function(t) if (is.null(t)) 0L else length(t$spans),
                   integer(1)
                 ))
-                if (n_total == 0) return(empty_df)
+                if (n_total == 0) {
+                  return(empty_df)
+                }
 
                 # Pre-allocate vectors
                 v_traceID <- character(n_total)
@@ -166,7 +172,9 @@ new_otel_block <- function(
 
                 idx <- 0L
                 for (trace in traces) {
-                  if (is.null(trace)) next
+                  if (is.null(trace)) {
+                    next
+                  }
                   for (sp in trace$spans) {
                     idx <- idx + 1L
                     d <- sp$spanData
@@ -181,9 +189,11 @@ new_otel_block <- function(
                     v_endTime[idx] <- as.numeric(d$endTime)
                     v_depth[idx] <- sp$depth %||% 0L
                     svc <- d$resource$attributes$service.name
-                    v_service_name[idx] <- if (
-                      is.null(svc) || !nzchar(svc)
-                    ) NA_character_ else svc
+                    v_service_name[idx] <- if (is.null(svc) || !nzchar(svc)) {
+                      NA_character_
+                    } else {
+                      svc
+                    }
                     sid <- d$attributes$session.id
                     v_session_id[idx] <- sid %||% NA_character_
                   }
@@ -212,15 +222,26 @@ new_otel_block <- function(
 
           bslib::bind_task_button(run_task, "run")
 
-          # Trigger task on button click (only if apps are running)
+          # Overridden by clear button
+          r_cleared <- reactiveVal(FALSE)
+          r_has_data <- reactiveVal(FALSE)
+
+          # ── Toggle buttons based on app/data status ─────────────────
           observe({
-            if (!any_app_running()) {
-              showNotification(
-                "No apps are running. Start an app first.",
-                type = "warning"
-              )
-              return()
+            if (any_app_running()) {
+              shinyjs::enable("run")
+            } else {
+              shinyjs::disable("run")
             }
+            if (any_app_running() && r_has_data()) {
+              shinyjs::enable("clear")
+            } else {
+              shinyjs::disable("clear")
+            }
+          })
+
+          # Trigger task on button click
+          observe({
             r_cleared(FALSE)
             run_task$invoke(
               browser_port = r_browser_port()
@@ -228,14 +249,19 @@ new_otel_block <- function(
           }) |>
             bindEvent(input$run)
 
-          # Overridden by clear button
-          r_cleared <- reactiveVal(FALSE)
+          # Track when data is available
+          observe({
+            result <- run_task$result()
+            r_has_data(is.data.frame(result) && nrow(result) > 0)
+          })
 
           # Result reactive with status handling
           task_result <- reactive({
             if (r_cleared()) {
               return(bquote_extended_task(
-                data.frame(), "Traces cleared.", "initial"
+                data.frame(),
+                "Traces cleared.",
+                "initial"
               ))
             }
             tryCatch(
@@ -299,6 +325,7 @@ new_otel_block <- function(
               {
                 rpc_call("clearTraces", port = r_browser_port())
                 r_cleared(TRUE)
+                r_has_data(FALSE)
                 showNotification(
                   "Traces cleared.",
                   type = "message",
@@ -328,6 +355,7 @@ new_otel_block <- function(
       ns <- NS(id)
 
       tagList(
+        shinyjs::useShinyjs(),
         div(
           style = "padding: 10px;",
           tags$h4("OTel Profiler"),
@@ -360,6 +388,19 @@ new_otel_block <- function(
     },
     dat_valid = function(...args) {
       stopifnot(length(...args) >= 1L)
+      has_running <- any(vapply(
+        ...args,
+        function(x) {
+          is.data.frame(x) &&
+            nrow(x) > 0 &&
+            "app_url" %in% names(x) &&
+            !is.na(x$app_url[1])
+        },
+        logical(1)
+      ))
+      if (!has_running) {
+        stop("No app running. Click Start to launch in App block.")
+      }
     },
     allow_empty_state = TRUE,
     class = c("otel_block", "async_block"),

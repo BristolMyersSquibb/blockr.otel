@@ -17,6 +17,7 @@ Imports:
     processx,
     promises,
     shiny,
+    shinyjs,
     shinytest2
 Suggests:
     blockr.bi,

@@ -43,6 +43,10 @@ new_app_driver_block <- function(
 
           observeEvent(input$app_dir, r_app_dir(trimws(input$app_dir)))
 
+          # ── Initial button states ─────────────────────────────────
+          shinyjs::disable("stop")
+          shinyjs::disable("log")
+
           # ── ExtendedTask: launch Rscript + poll stdout for URL ────
           start_task <- ExtendedTask$new(function(
             rscript_bin, script_path, log_file
@@ -172,6 +176,10 @@ new_app_driver_block <- function(
               name = r_svc_name(),
               stringsAsFactors = FALSE
             ))
+            # App is running — enable stop/log, disable start
+            shinyjs::enable("stop")
+            shinyjs::enable("log")
+            shinyjs::disable("start")
             showNotification(
               sprintf("Started %s at %s", r_svc_name(), result$url),
               type = "message",
@@ -183,10 +191,6 @@ new_app_driver_block <- function(
           observeEvent(input$log, {
             log_file <- r_log_file()
             pid <- r_pid()
-            if (is.null(log_file) || !file.exists(log_file)) {
-              showNotification("No log available.", type = "warning")
-              return()
-            }
             log_lines <- tryCatch(
               readLines(log_file, warn = FALSE),
               error = function(e) character(0)
@@ -241,6 +245,10 @@ new_app_driver_block <- function(
                 name = name %||% "",
                 stringsAsFactors = FALSE
               ))
+              # Process died — re-enable start, disable stop/log
+              shinyjs::enable("start")
+              shinyjs::disable("stop")
+              shinyjs::disable("log")
             }
           })
 
@@ -253,6 +261,10 @@ new_app_driver_block <- function(
               name = name %||% "",
               stringsAsFactors = FALSE
             ))
+            # App stopped — re-enable start, disable stop/log
+            shinyjs::enable("start")
+            shinyjs::disable("stop")
+            shinyjs::disable("log")
           })
 
           # ── Cleanup on session end ─────────────────────────────────
@@ -261,9 +273,13 @@ new_app_driver_block <- function(
           })
 
           list(
-            expr = reactive(
-              bquote(identity(.(df)), list(df = r_result()))
-            ),
+            expr = reactive({
+              df <- r_result()
+              if (is.na(df$app_url[1])) {
+                stop("No app running. Click Start to launch.")
+              }
+              bquote(identity(.(df)), list(df = df))
+            }),
             state = list(
               app_dir = r_app_dir,
               name = name
@@ -275,6 +291,7 @@ new_app_driver_block <- function(
     ui = function(id) {
       ns <- NS(id)
       tagList(
+        shinyjs::useShinyjs(),
         div(
           style = "padding: 10px;",
           tags$h4("App Driver"),

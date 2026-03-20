@@ -3,6 +3,7 @@ library(blockr.bi)
 library(blockr.extra)
 library(blockr.echarts)
 library(blockr.otel)
+library(blockr.dplyr)
 library(mirai)
 
 # Async mode: span fetching runs in mirai workers,
@@ -43,7 +44,11 @@ serve(
         ),
         by = "name"
       ),
-      app1_head = new_head_block(n = 5),
+      app1_arrange = new_arrange_block(
+        columns = list(
+          list(column = "total_duration_ms", direction = "desc")
+        )
+      ),
       app1_bar_plot = new_ggplot_block(
         type = "bar",
         x = "total_duration_ms",
@@ -60,7 +65,11 @@ serve(
         ),
         by = "name"
       ),
-      app2_head = new_head_block(n = 5),
+      app2_arrange = new_arrange_block(
+        columns = list(
+          list(column = "total_duration_ms", direction = "desc")
+        )
+      ),
       app2_bar_plot = new_ggplot_block(
         type = "bar",
         x = "total_duration_ms",
@@ -114,13 +123,13 @@ serve(
       # ── App 1 branch ──────────────────────────────────────────────────────
       new_link("spans_filter", "filter_app1", "data"),
       new_link("filter_app1", "app1_summary", "data"),
-      new_link("app1_summary", "app1_head", "data"),
-      new_link("app1_head", "app1_bar_plot", "data"),
+      new_link("app1_summary", "app1_arrange", "data"),
+      new_link("app1_arrange", "app1_bar_plot", "data"),
       # ── App 2 branch ──────────────────────────────────────────────────────
       new_link("spans_filter", "filter_app2", "data"),
       new_link("filter_app2", "app2_summary", "data"),
-      new_link("app2_summary", "app2_head", "data"),
-      new_link("app2_head", "app2_bar_plot", "data"),
+      new_link("app2_summary", "app2_arrange", "data"),
+      new_link("app2_arrange", "app2_bar_plot", "data"),
       # ── App 1 trace gantt timeline ─────────────────────────────────────────
       new_link("filter_app1", "app1_gantt_prep", "data"),
       new_link("app1_gantt_prep", "app1_gantt_chart", "data"),
@@ -131,14 +140,14 @@ serve(
     stacks = list(
       new_stack(
         blocks = c(
-          "filter_app1", "app1_summary", "app1_head", "app1_bar_plot",
+          "filter_app1", "app1_summary", "app1_arrange", "app1_bar_plot",
           "app1_gantt_prep", "app1_gantt_chart"
         ),
         name = "App 1 Spans"
       ),
       new_stack(
         blocks = c(
-          "filter_app2", "app2_summary", "app2_head", "app2_bar_plot",
+          "filter_app2", "app2_summary", "app2_arrange", "app2_bar_plot",
           "app2_gantt_prep", "app2_gantt_chart"
         ),
         name = "App 2 Spans"

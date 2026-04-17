@@ -13,6 +13,9 @@
 #' @param app_dir Path to a Shiny app directory or single-file app.
 #' @param name Optional service name for OTEL. Defaults to the app
 #'   directory basename.
+#' @param timeout Timeout in seconds for the Shiny app to start.
+#'   Passed as `load_timeout` (in ms) to [shinytest2::AppDriver].
+#'   Defaults to 15.
 #' @param ... Forwarded to [blockr.core::new_data_block()]
 #'
 #' @return A block object of class `app_driver_block`.
@@ -20,6 +23,7 @@
 new_app_driver_block <- function(
   app_dir = "",
   name = NULL,
+  timeout = 15,
   ...
 ) {
   blockr.core::new_data_block(
@@ -30,6 +34,7 @@ new_app_driver_block <- function(
           ns <- session$ns
 
           r_app_dir <- reactiveVal(app_dir)
+          r_timeout <- reactiveVal(timeout)
           r_pid <- reactiveVal(NULL)
           r_log_file <- reactiveVal(NULL)
           r_svc_name <- reactiveVal(name %||% "")
@@ -42,6 +47,7 @@ new_app_driver_block <- function(
           )
 
           observeEvent(input$app_dir, r_app_dir(trimws(input$app_dir)))
+          observeEvent(input$timeout, r_timeout(input$timeout))
 
           # ── Initial button states ─────────────────────────────────
           shinyjs::disable("stop")
@@ -64,8 +70,11 @@ new_app_driver_block <- function(
 
                 pid <- proc$get_pid()
 
-                # Poll stdout for APP_URL: line (up to 60s)
-                for (i in seq_len(120)) {
+                # Poll stdout for APP_URL: line
+                # Allow enough time for AppDriver load_timeout + overhead
+                poll_secs <- timeout + 30
+                n_polls <- ceiling(poll_secs / 0.5)
+                for (i in seq_len(n_polls)) {
                   out <- tryCatch(
                     proc$read_output_lines(),
                     error = function(e) character(0)
@@ -93,11 +102,14 @@ new_app_driver_block <- function(
 
                 # Timed out — kill and report
                 try(proc$kill(), silent = TRUE)
-                stop("AppDriver did not start within 60 seconds.")
+                stop(sprintf(
+                  "AppDriver did not start within %d seconds.", poll_secs
+                ))
               },
               rscript_bin = rscript_bin,
               script_path = script_path,
-              log_file = log_file
+              log_file = log_file,
+              timeout = timeout
             )
             promises::as.promise(m)
           })
@@ -148,8 +160,9 @@ new_app_driver_block <- function(
             )
 
             # Prepare Rscript and log file
+            timeout_val <- r_timeout()
             script_path <- build_app_driver_script(
-              resolved_dir, svc_name, otel_vars
+              resolved_dir, svc_name, otel_vars, timeout_val
             )
             log_file <- tempfile(
               pattern = paste0("appdriver_log_", svc_name, "_"),
@@ -282,7 +295,8 @@ new_app_driver_block <- function(
             }),
             state = list(
               app_dir = r_app_dir,
-              name = name
+              name = name,
+              timeout = r_timeout
             )
           )
         }
@@ -301,6 +315,14 @@ new_app_driver_block <- function(
             value = app_dir,
             width = "100%",
             placeholder = "/path/to/app"
+          ),
+          numericInput(
+            inputId = ns("timeout"),
+            label = "Timeout (s)",
+            value = timeout,
+            min = 5,
+            step = 5,
+            width = "100%"
           ),
           div(
             class = "d-flex gap-2",
@@ -341,9 +363,10 @@ new_app_driver_block <- function(
 #' @param app_dir Resolved app directory path
 #' @param name Service name for the AppDriver
 #' @param otel_vars Named character vector of OTEL env vars
+#' @param timeout Timeout in seconds for AppDriver to load the app
 #' @return Path to the temp R script
 #' @noRd
-build_app_driver_script <- function(app_dir, name, otel_vars) {
+build_app_driver_script <- function(app_dir, name, otel_vars, timeout = 15) {
   lib_paths <- paste(deparse(.libPaths()), collapse = "")
   chrome_bin <- chromote::find_chrome()
 
@@ -365,8 +388,8 @@ build_app_driver_script <- function(app_dir, name, otel_vars) {
     "",
     "message('[appdriver] Creating AppDriver...')",
     sprintf(
-      "app <- shinytest2::AppDriver$new(app_dir = '%s', name = '%s')",
-      app_dir, name
+      "app <- shinytest2::AppDriver$new(app_dir = '%s', name = '%s', load_timeout = %d)",
+      app_dir, name, timeout * 1000L
     ),
     "message('[appdriver] AppDriver ready')",
     "",

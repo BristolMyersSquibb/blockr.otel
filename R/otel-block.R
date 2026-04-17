@@ -451,7 +451,8 @@ kill_viewer_by_port <- function(port) {
 start_otel_viewer <- function(
   browser_port = 8000L,
   http_port = 4318L,
-  grpc_port = 4317L
+  grpc_port = 4317L,
+  bind = Sys.getenv("OTEL_VIEWER_BIND", "")
 ) {
   # Check if a viewer is already running on this port
   already_running <- tryCatch(
@@ -488,15 +489,16 @@ start_otel_viewer <- function(
     )
   }
 
+  prefix <- if (nchar(bind) > 0L) paste0(bind, ":") else ""
   viewer_proc <- processx::process$new(
     command = viewer_bin,
     args = c(
       "--browser-port",
       as.character(browser_port),
       "--http",
-      as.character(http_port),
+      paste0(prefix, http_port),
       "--grpc",
-      as.character(grpc_port)
+      paste0(prefix, grpc_port)
     ),
     stdout = "|",
     stderr = "|",

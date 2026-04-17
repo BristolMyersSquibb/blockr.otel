@@ -489,16 +489,17 @@ start_otel_viewer <- function(
     )
   }
 
-  prefix <- if (nchar(bind) > 0L) paste0(bind, ":") else ""
+  host_args <- if (nchar(bind) > 0L) c("--host", bind) else character()
   viewer_proc <- processx::process$new(
     command = viewer_bin,
     args = c(
       "--browser-port",
       as.character(browser_port),
       "--http",
-      paste0(prefix, http_port),
+      as.character(http_port),
       "--grpc",
-      paste0(prefix, grpc_port)
+      as.character(grpc_port),
+      host_args
     ),
     stdout = "|",
     stderr = "|",

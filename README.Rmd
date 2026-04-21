@@ -117,6 +117,22 @@ branches, bar charts, and Gantt timeline views.
 
 </details>
 
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+Sys.setenv(NOT_CRAN = "true")
+pkgload::load_all(export_all = FALSE, quiet = TRUE)
+devtools::install(quick = TRUE, quiet = TRUE, upgrade = "never")
+unlink("man/figures/live-profiling.png")
+driver <- shinytest2::AppDriver$new(
+  "inst/examples/otel-profiler",
+  load_timeout = 60000
+)
+Sys.sleep(15)
+driver$get_screenshot("man/figures/live-profiling.png")
+driver$stop()
+```
+
+![Live profiling](man/figures/live-profiling.png)
+
 ## OTEL setup
 
 If you want to instrument your own apps (outside of the blockr.otel

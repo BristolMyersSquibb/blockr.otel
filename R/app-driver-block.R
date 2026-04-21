@@ -49,11 +49,11 @@ new_app_driver_block <- function(
           observeEvent(input$app_dir, r_app_dir(trimws(input$app_dir)))
           observeEvent(input$timeout, r_timeout(input$timeout))
 
-          # ── Initial button states ─────────────────────────────────
+          # -- Initial button states ---------------------------------
           shinyjs::disable("stop")
           shinyjs::disable("log")
 
-          # ── ExtendedTask: launch Rscript + poll stdout for URL ────
+          # -- ExtendedTask: launch Rscript + poll stdout for URL ----
           start_task <- ExtendedTask$new(function(
             rscript_bin, script_path, log_file
           ) {
@@ -100,7 +100,7 @@ new_app_driver_block <- function(
                   Sys.sleep(0.5)
                 }
 
-                # Timed out — kill and report
+                # Timed out --kill and report
                 try(proc$kill(), silent = TRUE)
                 stop(sprintf(
                   "AppDriver did not start within %d seconds.", poll_secs
@@ -116,7 +116,7 @@ new_app_driver_block <- function(
 
           bslib::bind_task_button(start_task, "start")
 
-          # ── Start app (on button click) ───────────────────────────
+          # -- Start app (on button click) ---------------------------
           observe({
             kill_app_driver(r_pid)
             r_pid(NULL)
@@ -171,7 +171,7 @@ new_app_driver_block <- function(
             r_log_file(log_file)
             r_svc_name(svc_name)
 
-            # Invoke mirai — it launches the Rscript + polls for URL
+            # Invoke mirai --it launches the Rscript + polls for URL
             start_task$invoke(
               rscript_bin = file.path(R.home("bin"), "Rscript"),
               script_path = script_path,
@@ -180,7 +180,7 @@ new_app_driver_block <- function(
           }) |>
             bindEvent(input$start)
 
-          # ── Handle task result ────────────────────────────────────
+          # -- Handle task result ------------------------------------
           observe({
             result <- start_task$result()
             r_pid(result$pid)
@@ -189,7 +189,7 @@ new_app_driver_block <- function(
               name = r_svc_name(),
               stringsAsFactors = FALSE
             ))
-            # App is running — enable stop/log, disable start
+            # App is running --enable stop/log, disable start
             shinyjs::enable("stop")
             shinyjs::enable("log")
             shinyjs::disable("start")
@@ -200,7 +200,7 @@ new_app_driver_block <- function(
             )
           })
 
-          # ── Show process log on demand ─────────────────────────
+          # -- Show process log on demand -------------------------
           observeEvent(input$log, {
             log_file <- r_log_file()
             pid <- r_pid()
@@ -224,7 +224,7 @@ new_app_driver_block <- function(
             )
           })
 
-          # ── Monitor process health ───────────────────────────────
+          # -- Monitor process health -------------------------------
           observe({
             pid <- r_pid()
             if (is.null(pid)) return()
@@ -258,14 +258,14 @@ new_app_driver_block <- function(
                 name = name %||% "",
                 stringsAsFactors = FALSE
               ))
-              # Process died — re-enable start, disable stop/log
+              # Process died --re-enable start, disable stop/log
               shinyjs::enable("start")
               shinyjs::disable("stop")
               shinyjs::disable("log")
             }
           })
 
-          # ── Stop app ───────────────────────────────────────────────
+          # -- Stop app -----------------------------------------------
           observeEvent(input$stop, {
             kill_app_driver(r_pid)
             r_pid(NULL)
@@ -274,13 +274,13 @@ new_app_driver_block <- function(
               name = name %||% "",
               stringsAsFactors = FALSE
             ))
-            # App stopped — re-enable start, disable stop/log
+            # App stopped --re-enable start, disable stop/log
             shinyjs::enable("start")
             shinyjs::disable("stop")
             shinyjs::disable("log")
           })
 
-          # ── Cleanup on session end ─────────────────────────────────
+          # -- Cleanup on session end ---------------------------------
           session$onSessionEnded(function() {
             kill_app_driver(r_pid)
           })
@@ -396,7 +396,7 @@ build_app_driver_script <- function(app_dir, name, otel_vars, timeout = 15) {
     "# Print app URL to stdout so the polling process can read it",
     "cat(paste0('APP_URL:', app$get_url()), '\\n')",
     "",
-    "# Keep alive — AppDriver manages both app + Chrome",
+    "# Keep alive --AppDriver manages both app + Chrome",
     "while (TRUE) Sys.sleep(1)"
   ), script)
 

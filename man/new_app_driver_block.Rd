@@ -4,13 +4,17 @@
 \alias{new_app_driver_block}
 \title{App Driver Block}
 \usage{
-new_app_driver_block(app_dir = "", name = NULL, ...)
+new_app_driver_block(app_dir = "", name = NULL, timeout = 15, ...)
 }
 \arguments{
 \item{app_dir}{Path to a Shiny app directory or single-file app.}
 
 \item{name}{Optional service name for OTEL. Defaults to the app
 directory basename.}
+
+\item{timeout}{Timeout in seconds for the Shiny app to start.
+Passed as \code{load_timeout} (in ms) to \link[shinytest2:AppDriver]{shinytest2::AppDriver}.
+Defaults to 15.}
 
 \item{...}{Forwarded to \code{\link[blockr.core:new_data_block]{blockr.core::new_data_block()}}}
 }

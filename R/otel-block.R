@@ -53,8 +53,10 @@ new_otel_block <- function(
             ))
           })
 
-          # ── Start viewer at init so it's ready before apps ─────────
-          observe({
+          r_viewer_status <- reactiveVal("unknown")
+
+          # ── Start/stop viewer helpers ────────────────────────────────
+          do_start_viewer <- function() {
             http_port <- otel_http_port()
             grpc_port <- otel_grpc_port()
             viewer_info <- start_otel_viewer(
@@ -63,20 +65,86 @@ new_otel_block <- function(
               grpc_port
             )
             r_viewer_pid(viewer_info$pid)
+            r_viewer_status("healthy")
+          }
 
-            # Kill viewer when the Shiny app stops
-            pid <- viewer_info$pid
-            port <- r_browser_port()
-            shiny::onStop(function() {
-              if (!is.null(pid)) {
-                try(tools::pskill(pid), silent = TRUE)
-              } else {
-                # Viewer was reused; kill by port
-                try(kill_viewer_by_port(port), silent = TRUE)
-              }
-            })
+          do_stop_viewer <- function() {
+            pid <- r_viewer_pid()
+            if (!is.null(pid)) {
+              try(tools::pskill(pid), silent = TRUE)
+            } else {
+              try(kill_viewer_by_port(r_browser_port()), silent = TRUE)
+            }
+            r_viewer_pid(NULL)
+            r_viewer_status("error")
+          }
+
+          # Auto-start on init; clean up on session end
+          observe({
+            do_start_viewer()
           }) |>
             bindEvent(TRUE) # runs once at init
+
+          session$onSessionEnded(function() {
+            pid <- isolate(r_viewer_pid())
+            port <- isolate(r_browser_port())
+            if (!is.null(pid)) {
+              try(tools::pskill(pid), silent = TRUE)
+            } else {
+              try(kill_viewer_by_port(port), silent = TRUE)
+            }
+          })
+
+          # Start/Stop buttons
+          observeEvent(input$start_viewer, do_start_viewer())
+          observeEvent(input$stop_viewer, do_stop_viewer())
+
+          # ── Health polling ──────────────────────────────────────────
+          poll <- reactiveTimer(5000)
+          observe({
+            poll()
+            alive <- tryCatch({
+              rpc_call("getTraceSummaries", port = r_browser_port())
+              TRUE
+            }, error = function(e) FALSE)
+            r_viewer_status(if (alive) "healthy" else "error")
+            if (alive) {
+              shinyjs::disable("start_viewer")
+              shinyjs::enable("stop_viewer")
+            } else {
+              shinyjs::enable("start_viewer")
+              shinyjs::disable("stop_viewer")
+            }
+          })
+
+          # ── Viewer status output ────────────────────────────────────
+          output$viewer_status <- renderUI({
+            status <- r_viewer_status()
+            color <- if (status == "healthy") "#16a34a" else "#dc2626"
+            fill <- if (status == "healthy") "#dcfce7" else "#fee2e2"
+            label <- if (status == "healthy") "Running" else "Down"
+            tags$div(
+              class = "d-flex align-items-center gap-2",
+              style = "margin-bottom: 8px;",
+              tags$span(
+                class = "badge",
+                style = sprintf(
+                  "background-color:%s;color:%s;border:1px solid %s;",
+                  fill, color, color
+                ),
+                label
+              ),
+              if (status == "healthy") {
+                tags$a(
+                  href = sprintf("http://localhost:%s/", r_browser_port()),
+                  target = "_blank",
+                  class = "small",
+                  icon("external-link-alt"),
+                  " Viewer UI"
+                )
+              }
+            )
+          })
 
           # ── Async span fetching (viewer already running) ───────────
           run_task <- ExtendedTask$new(function(browser_port) {
@@ -345,7 +413,9 @@ new_otel_block <- function(
           list(
             expr = task_result,
             state = list(
-              browser_port = r_browser_port
+              browser_port = r_browser_port,
+              viewer_status = r_viewer_status,
+              viewer_pid = r_viewer_pid
             )
           )
         }
@@ -358,19 +428,23 @@ new_otel_block <- function(
         shinyjs::useShinyjs(),
         div(
           style = "padding: 10px;",
-          tags$h4("OTel Profiler"),
-          numericInput(
-            inputId = ns("browser_port"),
-            label = "Browser port",
-            value = browser_port,
-            min = 1024,
-            max = 65535,
-            width = "100%"
-          ),
-          uiOutput(ns("app_status")),
+          tags$h4(icon("chart-line"), " OTel Profiler"),
+          uiOutput(ns("viewer_status")),
           div(
-            class = "d-flex gap-2",
-            style = "margin-top: 10px;",
+            class = "d-flex gap-2 flex-wrap",
+            style = "margin-bottom: 10px;",
+            actionButton(
+              ns("start_viewer"),
+              "Start",
+              icon = icon("play"),
+              class = "btn-success btn-sm"
+            ),
+            actionButton(
+              ns("stop_viewer"),
+              "Stop",
+              icon = icon("stop"),
+              class = "btn-danger btn-sm"
+            ),
             bslib::input_task_button(
               ns("run"),
               "Fetch Spans",
@@ -380,9 +454,10 @@ new_otel_block <- function(
               ns("clear"),
               "Clear Spans",
               icon = icon("trash"),
-              class = "btn-danger btn-sm"
+              class = "btn-secondary btn-sm"
             )
-          )
+          ),
+          uiOutput(ns("app_status"))
         )
       )
     },
@@ -445,6 +520,8 @@ kill_viewer_by_port <- function(port) {
 #' @param browser_port otel-desktop-viewer browser port
 #' @param http_port OTLP HTTP port
 #' @param grpc_port OTLP gRPC port
+#' @param bind Host address to bind to. Reads `OTEL_VIEWER_BIND` env var.
+#'   Set to `"0.0.0.0"` to listen on all interfaces (needed for Docker).
 #'
 #' @return A list with `pid`, `browser_port`, `http_port`, `grpc_port`.
 #' @export

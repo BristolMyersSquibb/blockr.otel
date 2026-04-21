@@ -4,7 +4,12 @@
 \alias{start_otel_viewer}
 \title{Start otel-desktop-viewer and wait for it to be ready}
 \usage{
-start_otel_viewer(browser_port = 8000L, http_port = 4318L, grpc_port = 4317L)
+start_otel_viewer(
+  browser_port = 8000L,
+  http_port = 4318L,
+  grpc_port = 4317L,
+  bind = Sys.getenv("OTEL_VIEWER_BIND", "")
+)
 }
 \arguments{
 \item{browser_port}{otel-desktop-viewer browser port}
@@ -12,6 +17,9 @@ start_otel_viewer(browser_port = 8000L, http_port = 4318L, grpc_port = 4317L)
 \item{http_port}{OTLP HTTP port}
 
 \item{grpc_port}{OTLP gRPC port}
+
+\item{bind}{Host address to bind to. Reads \code{OTEL_VIEWER_BIND} env var.
+Set to \code{"0.0.0.0"} to listen on all interfaces (needed for Docker).}
 }
 \value{
 A list with \code{pid}, \code{browser_port}, \code{http_port}, \code{grpc_port}.

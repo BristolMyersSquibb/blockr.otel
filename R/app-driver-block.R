@@ -5,17 +5,22 @@
 #' and connecting a headless Chrome session, triggering Shiny session
 #' creation and OTEL span generation.
 #'
+#' When `app_dir` is a URL (`http://` or `https://`), the block connects
+#' to the already-running app without launching a new process. In that
+#' case, OTEL must be configured on the remote app separately.
+#'
 #' Uses [ExtendedTask] + [mirai::mirai()] so the start button shows a
 #' loading indicator while the AppDriver boots up. The mirai worker
 #' launches the Rscript, polls its stdout for the app URL, and returns
 #' the URL + PID. The main process stores the PID for stop/cleanup.
 #'
-#' @param app_dir Path to a Shiny app directory or single-file app.
+#' @param app_dir Path to a Shiny app directory, single-file app, or URL
+#'   of a running Shiny app.
 #' @param name Optional service name for OTEL. Defaults to the app
 #'   directory basename.
 #' @param timeout Timeout in seconds for the Shiny app to start.
 #'   Passed as `load_timeout` (in ms) to [shinytest2::AppDriver].
-#'   Defaults to 15.
+#'   Defaults to 15. Ignored when `app_dir` is a URL.
 #' @param ... Forwarded to [blockr.core::new_data_block()]
 #'
 #' @return A block object of class `app_driver_block`.
@@ -49,11 +54,11 @@ new_app_driver_block <- function(
           observeEvent(input$app_dir, r_app_dir(trimws(input$app_dir)))
           observeEvent(input$timeout, r_timeout(input$timeout))
 
-          # -- Initial button states ---------------------------------
+          # -- Initial button states ----------------------------------
           shinyjs::disable("stop")
           shinyjs::disable("log")
 
-          # -- ExtendedTask: launch Rscript + poll stdout for URL ----
+          # -- ExtendedTask: launch Rscript + poll stdout for URL ------
           start_task <- ExtendedTask$new(function(
             rscript_bin, script_path, log_file
           ) {
@@ -100,7 +105,7 @@ new_app_driver_block <- function(
                   Sys.sleep(0.5)
                 }
 
-                # Timed out --kill and report
+                # Timed out
                 try(proc$kill(), silent = TRUE)
                 stop(sprintf(
                   "AppDriver did not start within %d seconds.", poll_secs
@@ -114,9 +119,21 @@ new_app_driver_block <- function(
             promises::as.promise(m)
           })
 
-          bslib::bind_task_button(start_task, "start")
+          # -- ExtendedTask: connect to a URL --------------------------
+          connect_task <- ExtendedTask$new(function(app_url) {
+            m <- mirai::mirai(
+              {
+                list(url = app_url, pid = NULL)
+              },
+              app_url = app_url
+            )
+            promises::as.promise(m)
+          })
 
-          # -- Start app (on button click) ---------------------------
+          bslib::bind_task_button(start_task, "start")
+          bslib::bind_task_button(connect_task, "start")
+
+          # -- Start/connect app (on button click) ---------------------
           observe({
             kill_app_driver(r_pid)
             r_pid(NULL)
@@ -124,83 +141,84 @@ new_app_driver_block <- function(
             app_dir_val <- r_app_dir()
             if (nchar(app_dir_val) == 0) {
               showNotification(
-                "Please enter an app directory.",
+                "Please enter an app directory or URL.",
                 type = "warning"
               )
               return()
             }
 
-            svc_name <- name %||% tools::file_path_sans_ext(
-              basename(app_dir_val)
-            )
+            is_url <- grepl("^https?://", app_dir_val)
 
-            # Handle single-file apps
-            resolved_dir <- if (
-              !grepl("^https?://", app_dir_val) &&
-                file.exists(app_dir_val) &&
-                !file.info(app_dir_val)$isdir
-            ) {
-              tmp <- tempfile(pattern = svc_name)
-              dir.create(tmp)
-              file.copy(app_dir_val, file.path(tmp, "app.R"))
-              tmp
+            svc_name <- name %||% if (is_url) {
+              sub("^https?://", "", app_dir_val)
             } else {
-              app_dir_val
+              tools::file_path_sans_ext(basename(app_dir_val))
             }
 
-            http_port <- otel_http_port()
-
-            otel_vars <- c(
-              OTEL_SERVICE_NAME = svc_name,
-              OTEL_EXPORTER_OTLP_ENDPOINT = paste0(
-                "http://localhost:", http_port
-              ),
-              OTEL_TRACES_EXPORTER = "otlp",
-              OTEL_EXPORTER_OTLP_PROTOCOL = "http/protobuf"
-            )
-
-            # Prepare Rscript and log file
-            timeout_val <- r_timeout()
-            script_path <- build_app_driver_script(
-              resolved_dir, svc_name, otel_vars, timeout_val
-            )
-            log_file <- tempfile(
-              pattern = paste0("appdriver_log_", svc_name, "_"),
-              fileext = ".log"
-            )
-            r_log_file(log_file)
             r_svc_name(svc_name)
 
-            # Invoke mirai --it launches the Rscript + polls for URL
-            start_task$invoke(
-              rscript_bin = file.path(R.home("bin"), "Rscript"),
-              script_path = script_path,
-              log_file = log_file
-            )
+            if (is_url) {
+              # Connect to an already-running app
+              connect_task$invoke(app_url = app_dir_val)
+            } else {
+              # Handle single-file apps
+              resolved_dir <- if (
+                file.exists(app_dir_val) &&
+                  !file.info(app_dir_val)$isdir
+              ) {
+                tmp <- tempfile(pattern = svc_name)
+                dir.create(tmp)
+                file.copy(app_dir_val, file.path(tmp, "app.R"))
+                tmp
+              } else {
+                app_dir_val
+              }
+
+              http_port <- otel_http_port()
+
+              otel_vars <- c(
+                OTEL_SERVICE_NAME = svc_name,
+                OTEL_EXPORTER_OTLP_ENDPOINT = paste0(
+                  "http://localhost:", http_port
+                ),
+                OTEL_TRACES_EXPORTER = "otlp",
+                OTEL_EXPORTER_OTLP_PROTOCOL = "http/protobuf"
+              )
+
+              # Prepare Rscript and log file
+              timeout_val <- r_timeout()
+              script_path <- build_app_driver_script(
+                resolved_dir, svc_name, otel_vars, timeout_val
+              )
+              log_file <- tempfile(
+                pattern = paste0("appdriver_log_", svc_name, "_"),
+                fileext = ".log"
+              )
+              r_log_file(log_file)
+
+              # Invoke mirai: launches the Rscript + polls for URL
+              start_task$invoke(
+                rscript_bin = file.path(R.home("bin"), "Rscript"),
+                script_path = script_path,
+                log_file = log_file
+              )
+            }
           }) |>
             bindEvent(input$start)
 
-          # -- Handle task result ------------------------------------
+          # -- Handle task result (local launch) -----------------------
           observe({
             result <- start_task$result()
-            r_pid(result$pid)
-            r_result(data.frame(
-              app_url = result$url,
-              name = r_svc_name(),
-              stringsAsFactors = FALSE
-            ))
-            # App is running --enable stop/log, disable start
-            shinyjs::enable("stop")
-            shinyjs::enable("log")
-            shinyjs::disable("start")
-            showNotification(
-              sprintf("Started %s at %s", r_svc_name(), result$url),
-              type = "message",
-              duration = 3
-            )
+            on_app_started(result, r_pid, r_result, r_svc_name, session)
           })
 
-          # -- Show process log on demand -------------------------
+          # -- Handle task result (URL connect) ------------------------
+          observe({
+            result <- connect_task$result()
+            on_app_started(result, r_pid, r_result, r_svc_name, session)
+          })
+
+          # -- Show process log on demand ----------------------------
           observeEvent(input$log, {
             log_file <- r_log_file()
             pid <- r_pid()
@@ -224,7 +242,7 @@ new_app_driver_block <- function(
             )
           })
 
-          # -- Monitor process health -------------------------------
+          # -- Monitor process health ---------------------------------
           observe({
             pid <- r_pid()
             if (is.null(pid)) return()
@@ -258,14 +276,14 @@ new_app_driver_block <- function(
                 name = name %||% "",
                 stringsAsFactors = FALSE
               ))
-              # Process died --re-enable start, disable stop/log
+              # Process died: re-enable start, disable stop/log
               shinyjs::enable("start")
               shinyjs::disable("stop")
               shinyjs::disable("log")
             }
           })
 
-          # -- Stop app -----------------------------------------------
+          # -- Stop app ------------------------------------------------
           observeEvent(input$stop, {
             kill_app_driver(r_pid)
             r_pid(NULL)
@@ -274,13 +292,13 @@ new_app_driver_block <- function(
               name = name %||% "",
               stringsAsFactors = FALSE
             ))
-            # App stopped --re-enable start, disable stop/log
+            # App stopped: re-enable start, disable stop/log
             shinyjs::enable("start")
             shinyjs::disable("stop")
             shinyjs::disable("log")
           })
 
-          # -- Cleanup on session end ---------------------------------
+          # -- Cleanup on session end ----------------------------------
           session$onSessionEnded(function() {
             kill_app_driver(r_pid)
           })
@@ -311,10 +329,10 @@ new_app_driver_block <- function(
           tags$h4("App Driver"),
           textInput(
             inputId = ns("app_dir"),
-            label = "App directory",
+            label = "App directory or URL",
             value = app_dir,
             width = "100%",
-            placeholder = "/path/to/app"
+            placeholder = "/path/to/app or http://host:port"
           ),
           numericInput(
             inputId = ns("timeout"),
@@ -352,6 +370,25 @@ new_app_driver_block <- function(
     allow_empty_state = TRUE,
     class = "app_driver_block",
     ...
+  )
+}
+
+#' Handle successful app start/connect
+#' @noRd
+on_app_started <- function(result, r_pid, r_result, r_svc_name, session) {
+  r_pid(result$pid)
+  r_result(data.frame(
+    app_url = result$url,
+    name = r_svc_name(),
+    stringsAsFactors = FALSE
+  ))
+  shinyjs::enable("stop")
+  shinyjs::enable("log")
+  shinyjs::disable("start")
+  showNotification(
+    sprintf("Connected to %s at %s", r_svc_name(), result$url),
+    type = "message",
+    duration = 3
   )
 }
 
@@ -396,7 +433,7 @@ build_app_driver_script <- function(app_dir, name, otel_vars, timeout = 15) {
     "# Print app URL to stdout so the polling process can read it",
     "cat(paste0('APP_URL:', app$get_url()), '\\n')",
     "",
-    "# Keep alive --AppDriver manages both app + Chrome",
+    "# Keep alive: AppDriver manages both app + Chrome",
     "while (TRUE) Sys.sleep(1)"
   ), script)
 

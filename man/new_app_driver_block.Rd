@@ -7,14 +7,15 @@
 new_app_driver_block(app_dir = "", name = NULL, timeout = 15, ...)
 }
 \arguments{
-\item{app_dir}{Path to a Shiny app directory or single-file app.}
+\item{app_dir}{Path to a Shiny app directory, single-file app, or URL
+of a running Shiny app.}
 
 \item{name}{Optional service name for OTEL. Defaults to the app
 directory basename.}
 
 \item{timeout}{Timeout in seconds for the Shiny app to start.
 Passed as \code{load_timeout} (in ms) to \link[shinytest2:AppDriver]{shinytest2::AppDriver}.
-Defaults to 15.}
+Defaults to 15. Ignored when \code{app_dir} is a URL.}
 
 \item{...}{Forwarded to \code{\link[blockr.core:new_data_block]{blockr.core::new_data_block()}}}
 }
@@ -28,6 +29,10 @@ and connecting a headless Chrome session, triggering Shiny session
 creation and OTEL span generation.
 }
 \details{
+When \code{app_dir} is a URL (\verb{http://} or \verb{https://}), the block connects
+to the already-running app without launching a new process. In that
+case, OTEL must be configured on the remote app separately.
+
 Uses \link[shiny:ExtendedTask]{shiny::ExtendedTask} + \code{\link[mirai:mirai]{mirai::mirai()}} so the start button shows a
 loading indicator while the AppDriver boots up. The mirai worker
 launches the Rscript, polls its stdout for the app URL, and returns

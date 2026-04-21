@@ -23,6 +23,7 @@ Suggests:
     blockr.bi,
     blockr.extra,
     blockr.echarts,
+    config,
     devtools,
     withr
 Encoding: UTF-8

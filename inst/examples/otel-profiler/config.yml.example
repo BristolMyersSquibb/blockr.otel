@@ -1,0 +1,14 @@
+# Copy this file to config.yml and edit the paths.
+# config.yml is gitignored and will not be committed.
+# See https://rstudio.github.io/config/ for details.
+default:
+  apps:
+    app1:
+      app_dir: "/path/to/your/first/app"
+      timeout: 15
+    app2:
+      app_dir: "/path/to/your/second/app"
+      timeout: 60
+    app3:
+      app_dir: "http://localhost:3838"
+      timeout: 15

@@ -6,7 +6,7 @@
 \alias{blockr.otel-package}
 \title{blockr.otel: OpenTelemetry Profiling Tools for Blockr}
 \description{
-Provides blockr blocks for profiling Shiny applications with OpenTelemetry. Includes an orchestrator block that manages otel-desktop-viewer and shinytest2 app drivers, and integrates with blockr.echarts for interactive timeline visualization.
+Provides blockr blocks for profiling Shiny applications with OpenTelemetry. Includes an orchestrator block that manages otel-desktop-viewer and app driver processes, and integrates with blockr.echarts for interactive timeline visualization.
 }
 \author{
 \strong{Maintainer}: Cynkra \email{mail@cynkra.com}

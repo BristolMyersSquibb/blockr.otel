@@ -16,6 +16,8 @@
 #' @export
 new_otel_block <- function(
   browser_port = 8000L,
+  auto_start = TRUE,
+  auto_stop = TRUE,
   ...
 ) {
   blockr.core::new_transform_block(
@@ -53,6 +55,8 @@ new_otel_block <- function(
             ))
           })
 
+          r_auto_start <- reactiveVal(auto_start)
+          r_auto_stop <- reactiveVal(auto_stop)
           r_viewer_status <- reactiveVal("unknown")
 
           # ── Start/stop viewer helpers ────────────────────────────────
@@ -79,21 +83,26 @@ new_otel_block <- function(
             r_viewer_status("error")
           }
 
-          # Auto-start on init; clean up on session end
-          observe({
-            do_start_viewer()
-          }) |>
-            bindEvent(TRUE) # runs once at init
+          # Auto-start on init (when enabled)
+          if (auto_start) {
+            observe({
+              do_start_viewer()
+            }) |>
+              bindEvent(TRUE) # runs once at init
+          }
 
-          session$onSessionEnded(function() {
-            pid <- isolate(r_viewer_pid())
-            port <- isolate(r_browser_port())
-            if (!is.null(pid)) {
-              try(tools::pskill(pid), silent = TRUE)
-            } else {
-              try(kill_viewer_by_port(port), silent = TRUE)
-            }
-          })
+          # Clean up on session end (when enabled)
+          if (auto_stop) {
+            session$onSessionEnded(function() {
+              pid <- isolate(r_viewer_pid())
+              port <- isolate(r_browser_port())
+              if (!is.null(pid)) {
+                try(tools::pskill(pid), silent = TRUE)
+              } else {
+                try(kill_viewer_by_port(port), silent = TRUE)
+              }
+            })
+          }
 
           # Start/Stop buttons
           observeEvent(input$start_viewer, do_start_viewer())
@@ -414,6 +423,8 @@ new_otel_block <- function(
             expr = task_result,
             state = list(
               browser_port = r_browser_port,
+              auto_start = r_auto_start,
+              auto_stop = r_auto_stop,
               viewer_status = r_viewer_status,
               viewer_pid = r_viewer_pid
             )
@@ -448,13 +459,13 @@ new_otel_block <- function(
             bslib::input_task_button(
               ns("run"),
               "Fetch Spans",
-              class = "btn-primary btn-sm"
+              class = "btn-secondary btn-sm"
             ),
             actionButton(
               ns("clear"),
               "Clear Spans",
               icon = icon("trash"),
-              class = "btn-secondary btn-sm"
+              class = "btn-danger btn-sm"
             )
           ),
           uiOutput(ns("app_status"))

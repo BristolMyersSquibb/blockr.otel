@@ -1,6 +1,11 @@
 # Copy this file to config.yml and edit the paths.
 # config.yml is gitignored and will not be committed.
 # See https://rstudio.github.io/config/ for details.
+#
+# Fields:
+#   app_dir  - path to a Shiny app directory, single file, or URL
+#   name     - OTEL service name (defaults to the config key)
+#   timeout  - seconds to wait for app startup (default 15)
 default:
   apps:
     app1:
@@ -8,6 +13,7 @@ default:
       timeout: 15
     app2:
       app_dir: "/path/to/your/second/app"
+      name: "my-second-app"
       timeout: 60
     app3:
       app_dir: "http://localhost:3838"

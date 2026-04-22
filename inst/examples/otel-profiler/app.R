@@ -36,18 +36,17 @@ app_blocks <- lapply(names(apps), function(id) {
   a <- apps[[id]]
   new_app_driver_block(
     app_dir = a$app_dir,
+    name = a$name %||% id,
     timeout = a$timeout %||% 15
   )
 })
 names(app_blocks) <- names(apps)
 
 # ── Build per-app analysis branches ─────────────────────────────────────────
-analysis_blocks <- list()
-analysis_links <- list()
-analysis_stacks <- list()
-
-for (id in names(apps)) {
-  svc <- apps[[id]]$service_name %||% id
+# Uses lapply (not for loop) so each iteration gets its own
+# environment, avoiding lazy evaluation issues with block state.
+per_app <- lapply(names(apps), function(id) {
+  svc <- apps[[id]]$name %||% id
   filter_id <- paste0("filter_", id)
   summary_id <- paste0(id, "_summary")
   arrange_id <- paste0(id, "_arrange")
@@ -55,7 +54,8 @@ for (id in names(apps)) {
   gantt_prep_id <- paste0(id, "_gantt_prep")
   gantt_id <- paste0(id, "_gantt_chart")
 
-  analysis_blocks[[filter_id]] <- new_filter_block(
+  blocks <- list()
+  blocks[[filter_id]] <- new_filter_block(
     state = list(
       conditions = list(
         list(
@@ -68,7 +68,7 @@ for (id in names(apps)) {
       operator = "&"
     )
   )
-  analysis_blocks[[summary_id]] <- new_summarize_block(
+  blocks[[summary_id]] <- new_summarize_block(
     state = list(
       summaries = list(
         list(
@@ -80,21 +80,21 @@ for (id in names(apps)) {
       by = list("name")
     )
   )
-  analysis_blocks[[arrange_id]] <- new_arrange_block(
+  blocks[[arrange_id]] <- new_arrange_block(
     state = list(
       columns = list(
         list(column = "total_duration_ms", direction = "desc")
       )
     )
   )
-  analysis_blocks[[bar_id]] <- new_ggplot_block(
+  blocks[[bar_id]] <- new_ggplot_block(
     type = "bar",
     x = "total_duration_ms",
     y = "name",
     visible = "outputs",
     block_name = paste(id, "Span Duration")
   )
-  analysis_blocks[[gantt_prep_id]] <- new_mutate_block(
+  blocks[[gantt_prep_id]] <- new_mutate_block(
     state = list(
       mutations = list(
         list(
@@ -106,7 +106,7 @@ for (id in names(apps)) {
       by = list()
     )
   )
-  analysis_blocks[[gantt_id]] <- new_echart_gantt_block(
+  blocks[[gantt_id]] <- new_echart_gantt_block(
     start = "offset_start",
     end = "offset_end",
     name = "name",
@@ -117,25 +117,29 @@ for (id in names(apps)) {
     block_name = paste(id, "Trace Timeline")
   )
 
-  analysis_links <- c(analysis_links, list(
+  links <- list(
     new_link("spans_filter", filter_id, "data"),
     new_link(filter_id, summary_id, "data"),
     new_link(summary_id, arrange_id, "data"),
     new_link(arrange_id, bar_id, "data"),
     new_link(filter_id, gantt_prep_id, "data"),
     new_link(gantt_prep_id, gantt_id, "data")
-  ))
+  )
 
-  analysis_stacks <- c(analysis_stacks, list(
-    new_stack(
-      blocks = c(
-        filter_id, summary_id, arrange_id, bar_id,
-        gantt_prep_id, gantt_id
-      ),
-      name = paste(id, "Spans")
-    )
-  ))
-}
+  stack <- new_stack(
+    blocks = c(
+      filter_id, summary_id, arrange_id, bar_id,
+      gantt_prep_id, gantt_id
+    ),
+    name = paste(id, "Spans")
+  )
+
+  list(blocks = blocks, links = links, stack = stack)
+})
+
+analysis_blocks <- unlist(lapply(per_app, `[[`, "blocks"), recursive = FALSE)
+analysis_links <- unlist(lapply(per_app, `[[`, "links"), recursive = FALSE)
+analysis_stacks <- lapply(per_app, `[[`, "stack")
 
 # ── Assemble the board ──────────────────────────────────────────────────────
 all_blocks <- c(

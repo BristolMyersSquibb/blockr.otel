@@ -326,7 +326,7 @@ new_app_driver_block <- function(
         shinyjs::useShinyjs(),
         div(
           style = "padding: 10px;",
-          tags$h4("App Driver"),
+          tags$h4(icon("rocket"), " App Driver"),
           textInput(
             inputId = ns("app_dir"),
             label = "App directory or URL",
@@ -343,25 +343,31 @@ new_app_driver_block <- function(
             width = "100%"
           ),
           div(
-            class = "d-flex gap-2",
+            class = "btn-toolbar",
+            role = "toolbar",
             style = "margin-bottom: 10px;",
-            bslib::input_task_button(
-              ns("start"),
-              "Start App",
-              icon = icon("play"),
-              class = "btn-primary btn-sm"
+            div(
+              class = "btn-group btn-group-sm me-2",
+              role = "group",
+              bslib::input_task_button(
+                ns("start"),
+                label = tagList(icon("play"), "Start"),
+                class = "btn-success btn-sm"
+              ),
+              actionButton(
+                ns("stop"),
+                label = tagList(icon("stop"), "Stop"),
+                class = "btn-danger btn-sm"
+              )
             ),
-            actionButton(
-              ns("stop"),
-              "Stop App",
-              icon = icon("stop"),
-              class = "btn-danger btn-sm"
-            ),
-            actionButton(
-              ns("log"),
-              "Log",
-              icon = icon("terminal"),
-              class = "btn-secondary btn-sm"
+            div(
+              class = "btn-group btn-group-sm",
+              role = "group",
+              actionButton(
+                ns("log"),
+                label = tagList(icon("terminal"), "Log"),
+                class = "btn-secondary btn-sm"
+              )
             )
           )
         )

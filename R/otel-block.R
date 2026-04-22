@@ -445,30 +445,36 @@ new_otel_block <- function(
           tags$h4(icon("chart-line"), " OTel Profiler"),
           uiOutput(ns("viewer_status")),
           div(
-            class = "d-flex gap-2 flex-wrap",
+            class = "btn-toolbar",
+            role = "toolbar",
             style = "margin-bottom: 10px;",
-            actionButton(
-              ns("start_viewer"),
-              "Start",
-              icon = icon("play"),
-              class = "btn-success btn-sm"
+            div(
+              class = "btn-group btn-group-sm me-2",
+              role = "group",
+              actionButton(
+                ns("start_viewer"),
+                label = tagList(icon("play"), "Start"),
+                class = "btn-success btn-sm"
+              ),
+              actionButton(
+                ns("stop_viewer"),
+                label = tagList(icon("stop"), "Stop"),
+                class = "btn-danger btn-sm"
+              )
             ),
-            actionButton(
-              ns("stop_viewer"),
-              "Stop",
-              icon = icon("stop"),
-              class = "btn-danger btn-sm"
-            ),
-            bslib::input_task_button(
-              ns("run"),
-              "Fetch Spans",
-              class = "btn-secondary btn-sm"
-            ),
-            actionButton(
-              ns("clear"),
-              "Clear Spans",
-              icon = icon("trash"),
-              class = "btn-danger btn-sm"
+            div(
+              class = "btn-group btn-group-sm",
+              role = "group",
+              bslib::input_task_button(
+                ns("run"),
+                label = tagList(icon("download"), "Fetch"),
+                class = "btn-secondary btn-sm"
+              ),
+              actionButton(
+                ns("clear"),
+                label = tagList(icon("trash"), "Clear"),
+                class = "btn-outline-danger btn-sm"
+              )
             )
           ),
           uiOutput(ns("app_status"))

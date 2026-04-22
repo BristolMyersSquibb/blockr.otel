@@ -334,6 +334,9 @@ new_otel_block <- function(
 
           # Result reactive with status handling
           task_result <- reactive({
+            if (r_viewer_status() != "healthy") {
+              stop("OTel viewer is not running. Start it first.")
+            }
             if (r_cleared()) {
               return(bquote_extended_task(
                 data.frame(),
